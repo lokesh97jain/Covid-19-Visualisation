@@ -1,0 +1,169 @@
+---
+title: "Covid-19 Data Analysis"
+author: "Lokesh Surendra Jain"
+date: '2023-03-17'
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, results="hide", warning=F, message=F}
+library(data.table)
+library(dplyr)
+library(dplyr)
+library(tidyr)
+library(plotly)
+library(lubridate)
+```
+
+# Covid-19 Dataset.
+
+Download
+[us-states.csv](https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-states.csv)
+
+<https://github.com/nytimes/covid-19-data/>.
+[README.md](https://github.com/nytimes/covid-19-data/blob/master/README.md)
+for details on file content.
+
+```{r}
+usstate_data <- fread("C:/Users/lokes/Downloads/us-states.csv", stringsAsFactors = TRUE)
+
+```
+
+```{r}
+usstate_data
+```
+
+```{r}
+
+us_states <- usstate_data
+us_states$date <- as.Date(usstate_data$date)
+us_states_new <- us_states %>%
+  mutate(month = format(as.Date(date), "%Y-%m")) %>%
+  group_by(state, month) %>%
+  summarise(cases_per_month = max(cases) - min(cases), .groups = "drop")
+
+us_states_new
+
+```
+
+```{r}
+us_states_new$month <- as.Date(paste0(us_states_new$month, "-01"))
+
+plot <- plot_ly(data = us_states_new, x = ~month, y = ~cases_per_month, color = ~state, type = "scatter", mode = "lines + markers")
+plot <- plot %>% layout(xaxis = list(tickformat = "%b-%Y"),yaxis = list(title = "New Cases"))
+
+plot
+
+```
+
+\
+
+```{r}
+
+
+ny_data <- us_states_new %>%
+  filter(state == "New York")
+
+plot_ly(data = ny_data, x = ~ny_data$month, y = ~cases_per_month, type = "scatter", mode = "markers") %>%
+  layout(title = "New Monthly Cases in New York",
+         xaxis = list(title = "Month", tickformat = "%b-%Y"),
+         yaxis = list(title = "New Cases"))
+
+```
+
+```{r}
+
+us_dataframe_new <- usstate_data %>%
+  filter(state == "New York") %>%
+  mutate(year_month = format(date, "%Y-%m-%d")) %>%
+  group_by(state, year_month, fips) %>%
+  summarise(cases_cum = max(cases),
+            deaths_cum = max(deaths),
+            cases = cases_cum - lag(cases_cum, default = 0), .groups = "drop") %>%
+  arrange(desc(cases)) %>%
+  ungroup() %>%
+  select(state, year_month, fips, cases_cum, deaths_cum, cases)
+
+head(us_dataframe_new, 1)
+
+us_states_ny <- usstate_data %>%
+  filter(state == "New York") %>%
+  group_by(date) %>%
+  summarise(cases = sum(cases)) %>%
+  filter(cases == max(cases)) %>%
+  pull(date)
+
+highest_cases_date <- as.character(us_states_ny)
+
+head(highest_cases_date)
+```
+
+```{r}
+
+us_states_new$code = state.abb[match(us_states_new$state, state.name)]
+plot_ly(type = "choropleth", locations = us_states_new$code, locationmode = "usa-state", z = us_states_new$cases_per_month, colorbar = list(title = "Cases per Month"))%>%
+  layout(geo = list(scope = "usa"))
+
+
+us_states_new$code = state.abb[match(us_states_new$state, state.name)]
+
+plot_ly(
+  type = "choropleth",
+  locations = us_states_new$code,
+  locationmode = "USA-states",
+  z = us_states_new$cases_per_month*200,
+  zmin = 0,
+  zmax = max(us_states_new$cases_per_month),
+  text = us_states_new$state
+) %>%
+  colorbar(title = "Cases per Month", tickformat = ",", ticktext = c("1M", "2M")) %>%
+  layout(
+    geo = list(scope = "usa", projection = list(type = "albers usa"), lakecolor = toRGB("white"))
+  )
+
+```
+
+```{r}
+
+us_states_new$code = state.abb[match(us_states_new$state, state.name)]
+
+slider_steps <- lapply(unique(us_states_new$month), function(month) {
+list( method = "animate", args = list(list(frame = list(duration = 500, redraw = FALSE), fromcurrent = TRUE, transition = list(duration = 0))),
+label = as.character(month) )
+})
+
+plot_ly( type = "choropleth", locations = us_states_new$code,
+locationmode = "USA-states", z = us_states_new$cases_per_month*200,
+zmin = 0, zmax = max(us_states_new$cases_per_month),
+text = us_states_new$state, hoverinfo = "text",
+frame = ~as.character(us_states_new$month) ) %>%
+colorbar(title = "Cases per Month", tickformat = ",") %>%
+layout(
+geo = list(scope = "usa", projection = list(type = "albers usa"), lakecolor = toRGB("white")),
+updatemenus = list(
+list( type = "buttons", showactive = FALSE, buttons = list(
+list( label = "Play", method = "animate",
+args = list(list(frame = list(duration = 500, redraw = FALSE), fromcurrent = TRUE, transition = list(duration = 0))) ),
+list( label = "Pause", method = "animate",
+args = list(list(frame = list(duration = 0, redraw = FALSE), mode = "immediate", transition = list(duration = 0))) ) ),
+direction = "left", pad = list("10px", "60px"), x = 0.1,
+xanchor = "right", y = 0, yanchor = "top" ) ),
+sliders = list( list( active = 0, yanchor = "bottom",
+xanchor = "left",currentvalue = list( font = list(size = 16), prefix = "Month: ",
+xanchor = "right"
+),
+transition = list(duration = 300, easing = "cubic-in-out"),
+pad = list(10, 100),len = 0.9,x = 0.1, y = -0.1, steps = slider_steps
+) ) )
+
+# https://stackoverflow.com/questions/44203083/plotly-r-slider-widget
+# https://plotly.com/r/gapminder-example/
+# https://plotly.com/r/choropleth-maps/
+# https://plotly.com/r/sliders/ 
+
+```
